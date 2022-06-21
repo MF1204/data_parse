@@ -231,12 +231,12 @@ class SRC_DATA_M_CRUD:
 	            updr_id
 	        ) VALUES (
 	            {row_data}
-	        );;
+	        );
         """
         try:
             cur.execute(sql)
-        except Exception:
-            traceback.print_exc()
+        except psycopg2.Error as e:
+            print(e)
             return False
         return True
 
@@ -471,9 +471,8 @@ class SRC_DATA_D_CRUD:
             """
         try:
             cur.execute(sql)
-        except Exception:
-            print(row_data)
-            traceback.print_exc()
+        except psycopg2.Error as e:
+            print(e)
             return False
         return True
 
@@ -492,149 +491,73 @@ def sns_separate(whl_sns_nm):
 
 
 # 데이터 파싱
-def test_parse(data):
-    conn = psycopg2.connect(dbname='dutchboy', user='dutchboy', password='dutchboy2022!', host='3.36.61.69', port=5432)
-    cur = conn.cursor()
+def data_parse(data, filename):
+    # conn = psycopg2.connect(dbname='dutchboy', user='dutchboy', password='dutchboy2022!', host='3.36.61.69', port=5432)
+    # cur = conn.cursor()
 
     r = open(data, 'r')
     drs_full = r.readlines()
-
-    # src_data_m ===========================================
-    src_data_m = SRC_DATA_M_CRUD(cur)
-    f_val, k_val, d_val, v_val, u_val, whl_sns_nm, act_dtt = '', '', '', '', '', '', ''
+    filename = filename.replace('.drs', '')
+    print(filename)
+    print(len(drs_full))
+    print(drs_full)
+    # src_data_m =================================================
+    lot_time = ''
+    lot_no = ''
+    prs_cd = ''
+    f_val = ''
+    k_val = ''
+    d_val = ''
+    v_val = ''
+    u_val = ''
+    whl_sns_nm = ''
+    delete_list = []
     for line in drs_full:
-        if line[:1] == '$':
-            if line[1:2] == 'F':
-                f_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'K':
-                k_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'D':
-                d_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'V':
-                v_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'U':
-                u_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'A':
-                whl_sns_nm = line[3:].replace('\n', '')
-            elif line[1:2] == 'S':
-                act_dtt = line[3:].replace('\n', '')
-        else:
-            if f_val != '' and k_val != '' and d_val != '' and v_val != '' and u_val != '' and whl_sns_nm != '' and act_dtt != '':
-                break
-            else:
-                continue
-    lot_ymd = act_dtt[:10].replace('/', '')
-    lot_no = k_val.split(',')[3]
-    prs_cd_list = k_val.split(',')[:3]
-    prs_cd = '_'.join(prs_cd_list)
-    sns_sql_string = sns_separate(whl_sns_nm)
-    reg_string = "CURRENT_DATE, 'GUGO', "
-    upd_string = "CURRENT_DATE, 'GUGO'"
-
-    # ======================================================
-
-    # src_data_d ===========================================
-    src_data_d = SRC_DATA_D_CRUD(cur)
-    drs_string = ', '.join(e.replace('\n', '') for e in drs_full)
-    snv_list = drs_string.split('$S,')
-    result_list = []
-    lot_number = ''
-    wafer_number = ''
-    chamber_number = ''
-    idle_flag = ''
-    step_number = ''
-    for index, i in enumerate(snv_list):
-        if index > 0:  # $S가 나오기 전 = 헤더값
-            onerow = i.split(', ')
-            action_flag = onerow[0].split(',')  # $S줄의 데이터
-
-            if action_flag[1] == '1':  # $S의 플래그 값이 1인 경우
-                lot_number = action_flag[2].replace('"', '')
-                wafer_number = action_flag[3]
-                chamber_number = action_flag[4]
-                idle_flag = action_flag[5]
-                step_number = 'NULL'
-                if len(onerow) == 1:
-                    continue
-            elif action_flag[1] == '2':  # $S의 플래그 값이 2인 경우
-                chamber_number = action_flag[2]
-                step_number = action_flag[3]
-                idle_flag = action_flag[4]
-            elif action_flag[1] == '3':  # $S의 플래그 값이 3인 경우(데이터 없음)
-                chamber_number = action_flag[2]
-                step_number = action_flag[3]  # 이 경우 step_number = recipe_name
-                idle_flag = action_flag[4]
-                prs_cd_list[2] = action_flag[3].replace('"', '')
-                prs_cd = '_'.join(prs_cd_list)
-                continue
-            else:
-                pass
-            for snv_row in onerow[1:]:
-                if snv_row == '':
-                    break
-                snv_row_list = snv_row.split(',')
-                time = snv_row_list[0].split(' ')
-                yyyymmdd = time[0].split('/')
-                lot_ymd = f'{yyyymmdd[0].zfill(4)}{yyyymmdd[1].zfill(2)}{yyyymmdd[2].zfill(2)}'
-                lot_no = lot_number
-                occr_date_unready = time[1].split(':')
-                occr_date = f'{lot_ymd} {occr_date_unready[0]}:{occr_date_unready[1]}:{occr_date_unready[2]}.{occr_date_unready[3]}'
-                act_dtt = action_flag[1]
-                wfr_no = wafer_number
-                chm_no = chamber_number
-                idl_dtt = idle_flag
-                stp_no = step_number
-                whl_sns_val = ','.join(snv_row_list[1:])
-                snv_query_string = sns_separate(whl_sns_val)
-                reg_string = "CURRENT_DATE, 'GUGO', "
-                upd_string = "CURRENT_DATE, 'GUGO'"
-                sql_query = f"'{lot_ymd}', '{lot_no}', '{prs_cd}', '{occr_date}', '{act_dtt}', '{wfr_no}', '{chm_no}', '{idl_dtt}', '{stp_no}', '{whl_sns_val}', "
-                sql_query += snv_query_string + reg_string + upd_string
-                try:
-                    result_d = src_data_d.insert(sql_query)
-                    # result_list.append(result_d)
-                except Exception as e:
-                    print(f'src_d : {sql_query}')
-                    traceback.print_exc(e)
-                    return False
-
-    # ======================================================
-
-    sql_query = f"'{lot_ymd}', '{lot_no}', '{prs_cd}', '{f_val}', '{k_val}', '{d_val}', '{v_val}', '{u_val}', '{whl_sns_nm}', "
-    sql_query += sns_sql_string + reg_string + upd_string
-    # result_m = src_data_m.insert(sql_query)
-    print(f'src_m : {sql_query}')
-
-    # if result_m is True and False not in result_list:
-    #     conn.commit()
-    #     return True
-
-    return False
+        newline = line.replace('\n', '')
+        if '$F' in newline:
+            f_val = line
+            delete_list.append(f_val)
+        elif '$K' in newline:
+            k_val = line
+            delete_list.append(k_val)
+        elif '$D' in newline:
+            d_val = line
+            delete_list.append(d_val)
+        elif '$V' in newline:
+            v_val = line
+            delete_list.append(v_val)
+        elif '$U' in newline:
+            u_val = line
+            delete_list.append(u_val)
+        elif '$A' in newline:
+            whl_sns_nm = line
+            delete_list.append(whl_sns_nm)
+        elif '$S' in newline:
+            act_dtt = newline.split(',')[2]
+    for dead in delete_list:
+        drs_full.remove(dead)
+    for line in drs_full:
+        print(line.replace('\n', ''))
 
 
 if __name__ == "__main__":
     current_path = os.getcwd()
-    drs_list = Path(current_path) / 'test'
+    drs_list = Path(current_path) / 'drs'
     listdir = os.listdir(drs_list)
-    print(listdir)
+
+    flag = 0
     for dirname in listdir:
+        if flag == 1:
+            break
         file_path = drs_list / dirname
         result_check = []
         work_start = datetime.now()
         listdrs = os.listdir(file_path)
         for index, filename in enumerate(listdrs):
+            if flag == 1:
+                break
             print(f'{index} :: {filename}')
             drs_path = file_path / filename
             one_start = datetime.now()
-            result_final = test_parse(drs_path)
-
-            if result_final is False:
-                break
-            one_end = datetime.now()
-            print(f'{filename} 파일 처리 시간 : {one_end - one_start}')
-            result_check.append(result_final)
-        if False not in result_check:
-            work_end = datetime.now()
-            print(f'{len(result_check)}건 처리 시간 : {work_end - work_start}')
-        else:
-            print(result_check)
+            result_final = data_parse(drs_path, filename)
+            flag += 1

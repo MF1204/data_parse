@@ -231,12 +231,12 @@ class SRC_DATA_M_CRUD:
 	            updr_id
 	        ) VALUES (
 	            {row_data}
-	        );;
+	        );
         """
         try:
             cur.execute(sql)
         except psycopg2.Error as e:
-            print(e.pgcode)
+            print(e)
             return False
         return True
 
@@ -472,7 +472,7 @@ class SRC_DATA_D_CRUD:
         try:
             cur.execute(sql)
         except psycopg2.Error as e:
-            print(e.pgcode)
+            print(e)
             return False
         return True
 
