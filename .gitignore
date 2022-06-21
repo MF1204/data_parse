@@ -132,7 +132,13 @@ dmypy.json
 .pyre/
 .DS_Store
 *.csv
+*.drs
 .idea/misc.xml
 .idea/AIBIZ.iml
 .DS_Store
 *.whl
+
+# private
+drs/
+test/
+monitoring/
