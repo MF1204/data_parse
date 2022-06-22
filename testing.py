@@ -5,544 +5,137 @@ from pathlib import Path
 import psycopg2
 from datetime import datetime
 
+from drs_parsing import SRC_DATA_M_CRUD, SRC_DATA_D_CRUD, sns_separate
 
-# 데이터베이스 쿼리
-class SRC_DATA_M_CRUD:
-    def __init__(self, cursor):
-        self.tablename = 'tb_ai_src_data_m'
-        self.cursor = cursor
 
-    def insert(self, row_data):
-        cur = self.cursor
-        sql = f"""
-            INSERT INTO public.{self.tablename}(
-                lot_ymd,
-	            lot_no,
-	            prs_cd,
-	            f_val,
-	            k_val,
-	            d_val,
-	            v_val,
-	            u_val,
-	            whl_sns_nm,
-	            snn001,
-	            snn002,
-	            snn003, 
-	            snn004, 
-	            snn005, 
-	            snn006, 
-	            snn007, 
-	            snn008, 
-	            snn009, 
-	            snn010, 
-                snn011, 
-                snn012, 
-                snn013, 
-                snn014, 
-                snn015, 
-                snn016, 
-                snn017, 
-                snn018, 
-                snn019, 
-                snn020, 
-                snn021, 
-                snn022, 
-                snn023, 
-                snn024, 
-                snn025, 
-                snn026, 
-                snn027, 
-                snn028, 
-                snn029, 
-                snn030, 
-                snn031, 
-                snn032, 
-                snn033, 
-                snn034, 
-                snn035, 
-                snn036, 
-                snn037, 
-                snn038, 
-                snn039, 
-                snn040, 
-                snn041, 
-                snn042, 
-                snn043, 
-                snn044, 
-                snn045, 
-                snn046, 
-                snn047, 
-                snn048, 
-                snn049, 
-                snn050, 
-                snn051, 
-                snn052, 
-                snn053, 
-                snn054, 
-                snn055, 
-                snn056, 
-                snn057, 
-                snn058, 
-                snn059, 
-                snn060, 
-                snn061, 
-                snn062, 
-                snn063, 
-                snn064, 
-                snn065, 
-                snn066, 
-                snn067, 
-                snn068, 
-                snn069, 
-                snn070, 
-                snn071, 
-                snn072, 
-                snn073, 
-                snn074, 
-                snn075, 
-                snn076, 
-                snn077, 
-                snn078, 
-                snn079, 
-                snn080, 
-                snn081, 
-                snn082, 
-                snn083, 
-                snn084, 
-                snn085, 
-                snn086, 
-                snn087, 
-                snn088, 
-                snn089, 
-                snn090, 
-                snn091, 
-                snn092, 
-                snn093, 
-                snn094, 
-                snn095, 
-                snn096, 
-                snn097, 
-                snn098, 
-                snn099, 
-                snn100, 
-                snn101, 
-                snn102, 
-                snn103, 
-                snn104, 
-                snn105, 
-                snn106, 
-                snn107, 
-                snn108, 
-                snn109, 
-                snn110, 
-                snn111, 
-                snn112, 
-                snn113, 
-                snn114, 
-                snn115, 
-                snn116, 
-                snn117, 
-                snn118, 
-                snn119, 
-                snn120, 
-                snn121, 
-                snn122, 
-                snn123, 
-                snn124, 
-                snn125, 
-                snn126, 
-                snn127, 
-                snn128, 
-                snn129, 
-                snn130, 
-                snn131, 
-                snn132, 
-                snn133, 
-                snn134, 
-                snn135, 
-                snn136, 
-                snn137, 
-                snn138, 
-                snn139, 
-                snn140, 
-                snn141, 
-                snn142, 
-                snn143, 
-                snn144, 
-                snn145, 
-                snn146, 
-                snn147, 
-                snn148, 
-                snn149, 
-                snn150, 
-                snn151, 
-                snn152, 
-                snn153, 
-                snn154, 
-                snn155, 
-                snn156, 
-                snn157, 
-                snn158, 
-                snn159, 
-                snn160, 
-                snn161, 
-                snn162, 
-                snn163, 
-                snn164, 
-                snn165, 
-                snn166, 
-                snn167, 
-                snn168, 
-                snn169, 
-                snn170, 
-                snn171, 
-                snn172, 
-                snn173, 
-                snn174, 
-                snn175, 
-                snn176, 
-                snn177, 
-                snn178, 
-                snn179, 
-                snn180, 
-                snn181, 
-                snn182, 
-                snn183, 
-                snn184, 
-                snn185, 
-                snn186, 
-                snn187, 
-                snn188, 
-                snn189, 
-                snn190, 
-                snn191, 
-                snn192, 
-                snn193, 
-                snn194, 
-                snn195, 
-                snn196, 
-                snn197, 
-                snn198, 
-                snn199, 
-                snn200, 
-	            reg_date,
-	            regr_id,
-	            upd_date,
-	            updr_id
-	        ) VALUES (
-	            {row_data}
-	        );
-        """
-        try:
-            cur.execute(sql)
-        except psycopg2.Error as e:
-            print(e)
+# $F, K, D, V, U, A 처리
+def master_dataset(src_class, drsfile_name, header_list):
+    head_dict = {}
+    for line in header_list:
+        head_dict[line[1:2]] = line[3:].replace('\n', '')
+    # src_data_m =================================================
+    k_val = head_dict['K']
+    lot_date = str(datetime.now().year)[:2] + drsfile_name.split('_')[3].replace('.drs', '')
+    col_01_file_nm = drsfile_name
+    col_02_lot_no = k_val.split(',')[3]
+    col_03_lot_date = f'{lot_date[:8]} {lot_date[8:10]}:{lot_date[10:]}'
+    col_04_prs_cd = '_'.join(k_val.split(',')[:3])
+    col_05_f_val = head_dict['F']
+    col_06_k_val = k_val
+    col_07_d_val = head_dict['D']
+    col_08_v_val = head_dict['V']
+    col_09_u_val = head_dict['U']
+    col_10_whl_sns_nm = head_dict['A']
+    col_11_reg_date = 'CURRENT_DATE'
+    col_12_regr_id = 'GUGO'
+    col_13_upd_date = 'CURRENT_DATE'
+    col_14_updr_id = 'GUGO'
+    src_m_string = f"""
+        '{col_01_file_nm}', '{col_02_lot_no}', '{col_03_lot_date}', '{col_04_prs_cd}',
+        '{col_05_f_val}', '{col_06_k_val}', '{col_07_d_val}', '{col_08_v_val}', '{col_09_u_val}',
+        '{col_10_whl_sns_nm}', {col_11_reg_date}, '{col_12_regr_id}', {col_13_upd_date}, '{col_14_updr_id}'
+    """
+    # print(src_m_string)
+    result_m = src_class.m_insert(src_m_string)
+    if result_m is False:
+        return False
+    result_s = src_class.m_select(drsfile_name)
+    # src_data_mc ================================================
+    sns_list = col_10_whl_sns_nm.upper().split(',')
+    for num, sns in enumerate(sns_list):
+        result_mc = src_class.mc_insert(result_s, num + 1, sns)
+        if result_mc is False:
             return False
-        return True
+    return result_s
 
 
-# 데이터베이스 쿼리
-class SRC_DATA_D_CRUD:
-    def __init__(self, cursor):
-        self.tablename = 'tb_ai_src_data_d'
-        self.cursor = cursor
-
-    def insert(self, row_data):
-        cur = self.cursor
-        sql = f"""
-            INSERT INTO public.{self.tablename}(
-                lot_ymd, 
-				lot_no,
-				prs_cd,
-				occr_date, 
-				act_dtt, 
-				wfr_no, 
-				chm_no, 
-				idl_dtt, 
-				stp_no, 
-				whl_sns_val, 
-				snv001, 
-				snv002, 
-				snv003, 
-   	            snv004, 
-   	            snv005, 
-   	            snv006, 
-   	            snv007, 
-   	            snv008, 
-   	            snv009, 
-   	            snv010, 
-                snv011, 
-                snv012, 
-                snv013, 
-                snv014, 
-                snv015, 
-                snv016, 
-                snv017, 
-                snv018, 
-                snv019, 
-                snv020, 
-                snv021, 
-                snv022, 
-                snv023, 
-                snv024, 
-                snv025, 
-                snv026, 
-                snv027, 
-                snv028, 
-                snv029, 
-                snv030, 
-                snv031, 
-                snv032, 
-                snv033, 
-                snv034, 
-                snv035, 
-                snv036, 
-                snv037, 
-                snv038, 
-                snv039, 
-                snv040, 
-                snv041, 
-                snv042, 
-                snv043, 
-                snv044, 
-                snv045, 
-                snv046, 
-                snv047, 
-                snv048, 
-                snv049, 
-                snv050, 
-                snv051, 
-                snv052, 
-                snv053, 
-                snv054, 
-                snv055, 
-                snv056, 
-                snv057, 
-                snv058, 
-                snv059, 
-                snv060, 
-                snv061, 
-                snv062, 
-                snv063, 
-                snv064, 
-                snv065, 
-                snv066, 
-                snv067, 
-                snv068, 
-                snv069, 
-                snv070, 
-                snv071, 
-                snv072, 
-                snv073, 
-                snv074, 
-                snv075, 
-                snv076, 
-                snv077, 
-                snv078, 
-                snv079, 
-                snv080, 
-                snv081, 
-                snv082, 
-                snv083, 
-                snv084, 
-                snv085, 
-                snv086, 
-                snv087, 
-                snv088, 
-                snv089, 
-                snv090, 
-                snv091, 
-                snv092, 
-                snv093, 
-                snv094, 
-                snv095, 
-                snv096, 
-                snv097, 
-                snv098, 
-                snv099, 
-                snv100, 
-                snv101, 
-                snv102, 
-                snv103, 
-                snv104, 
-                snv105, 
-                snv106, 
-                snv107, 
-                snv108, 
-                snv109, 
-                snv110, 
-                snv111, 
-                snv112, 
-                snv113, 
-                snv114, 
-                snv115, 
-                snv116, 
-                snv117, 
-                snv118, 
-                snv119, 
-                snv120, 
-                snv121, 
-                snv122, 
-                snv123, 
-                snv124, 
-                snv125, 
-                snv126, 
-                snv127, 
-                snv128, 
-                snv129, 
-                snv130, 
-                snv131, 
-                snv132, 
-                snv133, 
-                snv134, 
-                snv135, 
-                snv136, 
-                snv137, 
-                snv138, 
-                snv139, 
-                snv140, 
-                snv141, 
-                snv142, 
-                snv143, 
-                snv144, 
-                snv145, 
-                snv146, 
-                snv147, 
-                snv148, 
-                snv149, 
-                snv150, 
-                snv151, 
-                snv152, 
-                snv153, 
-                snv154, 
-                snv155, 
-                snv156, 
-                snv157, 
-                snv158, 
-                snv159, 
-                snv160, 
-                snv161, 
-                snv162, 
-                snv163, 
-                snv164, 
-                snv165, 
-                snv166, 
-                snv167, 
-                snv168, 
-                snv169, 
-                snv170, 
-                snv171, 
-                snv172, 
-                snv173, 
-                snv174, 
-                snv175, 
-                snv176, 
-                snv177, 
-                snv178, 
-                snv179, 
-                snv180, 
-                snv181, 
-                snv182, 
-                snv183, 
-                snv184, 
-                snv185, 
-                snv186, 
-                snv187, 
-                snv188, 
-                snv189, 
-                snv190, 
-                snv191, 
-                snv192, 
-                snv193, 
-                snv194, 
-                snv195, 
-                snv196, 
-                snv197, 
-                snv198, 
-                snv199, 
-                snv200, 
-   	            reg_date,
-    	        regr_id,
-    	        upd_date,
-    	        updr_id
-    	        ) VALUES (
-    	            {row_data}
-    	        );
-            """
-        try:
-            cur.execute(sql)
-        except psycopg2.Error as e:
-            print(e)
-            return False
-        return True
-
-
-# 전체 센서 코드 분리
-def sns_separate(whl_sns_nm):
-    sns_sql_string = ''
-    sns_list = whl_sns_nm.upper().split(',')
-    for sns in sns_list:
-        sns_sql_string += f"'{sns}', "
-    if len(sns_list) < 200:
-        for i in range(200 - len(sns_list)):
-            sns_sql_string += 'NULL, '
-    sns_sql_string = sns_sql_string.replace('\n', '')
-    return sns_sql_string
+# s1 ~ s3 처리
+def one_dataset(src_class, file_sno, sensor_list):
+    col_01_file_sno = file_sno
+    col_02_prs_cd = ''
+    col_03_wfr_no = ''
+    col_04_chm_no = ''
+    col_05_idl_dtt = ''
+    step_dataset = []
+    step_row_start = 0
+    step_row_end = 0
+    for val in sensor_list:
+        val = val.replace('\n', '').split(',')
+        if val[0] == '$S':
+            if val[2] == '1':
+                col_03_wfr_no = int(val[4])
+                col_04_chm_no = int(val[5])
+                col_05_idl_dtt = val[6]
+            elif val[2] == '2':
+                for steprow in step_dataset[step_row_start:step_row_end]:
+                    steprow['stp_no'] = val[4]
+                    step_row_start = step_row_end
+            elif val[2] == '3':
+                col_02_prs_cd = val[4].replace('"', '')
+                pass
+            else:
+                print('Error')
+                return False
+        else:
+            step_row_end += 1
+            onerow = {
+                'file_sno': file_sno,
+                'occr_date': val[0],
+                'prs_cd': col_02_prs_cd,
+                'wfr_no': col_03_wfr_no,
+                'chm_no': col_04_chm_no,
+                'idl_dtt': col_05_idl_dtt,
+                'stp_no': 0,
+                'whl_sns_val': ','.join(val[1:]),
+            }
+            step_dataset.append(onerow)
+    for row in step_dataset:
+        print(row)
 
 
 # 데이터 파싱
-def data_parse(data, filename):
-    # conn = psycopg2.connect(dbname='dutchboy', user='dutchboy', password='dutchboy2022!', host='3.36.61.69', port=5432)
-    # cur = conn.cursor()
+def test_parse(data, f_name):
+    conn = psycopg2.connect(dbname='dutchboy', user='dutchboy', password='dutchboy2022!', host='3.36.61.69', port=5432)
+    cur = conn.cursor()
+
+    src_m = SRC_DATA_M_CRUD(cur)
+    src_d = SRC_DATA_D_CRUD(cur)
 
     r = open(data, 'r')
     drs_full = r.readlines()
-    filename = filename.replace('.drs', '')
-    print(filename)
-    print(len(drs_full))
-    print(drs_full)
-    # src_data_m =================================================
-    lot_time = ''
-    lot_no = ''
-    prs_cd = ''
-    f_val = ''
-    k_val = ''
-    d_val = ''
-    v_val = ''
-    u_val = ''
-    whl_sns_nm = ''
-    delete_list = []
-    for line in drs_full:
-        newline = line.replace('\n', '')
-        if '$F' in newline:
-            f_val = line
-            delete_list.append(f_val)
-        elif '$K' in newline:
-            k_val = line
-            delete_list.append(k_val)
-        elif '$D' in newline:
-            d_val = line
-            delete_list.append(d_val)
-        elif '$V' in newline:
-            v_val = line
-            delete_list.append(v_val)
-        elif '$U' in newline:
-            u_val = line
-            delete_list.append(u_val)
-        elif '$A' in newline:
-            whl_sns_nm = line
-            delete_list.append(whl_sns_nm)
-        elif '$S' in newline:
-            act_dtt = newline.split(',')[2]
-    for dead in delete_list:
-        drs_full.remove(dead)
-    for line in drs_full:
-        print(line.replace('\n', ''))
+
+    # S1 index 추출
+    flag_list = []
+    for flag_1_index, line in enumerate(drs_full):
+        if line[:2] != '$S':
+            continue
+        else:
+            line_list = line.split(',')
+            if line_list[2] == '1':
+                flag_list.append(flag_1_index)
+    # $F, K, D, V, U, A 묶음
+    drs_index_0 = drs_full[0:flag_list[0]]
+    # result_sno = master_dataset(src_m, f_name, drs_index_0)
+    result_sno = 1
+    # S1 - S3 묶음 (1 ~ n-1)번째
+    for i in range(len(flag_list) - 1):
+        drs_index_mid = drs_full[flag_list[i]:flag_list[i + 1]]
+        one_dataset(src_d, result_sno, drs_index_mid)
+        return
+    # S1 - S3 묶음 n번째
+    drs_index_last = drs_full[flag_list[-1]:]
+    one_dataset(src_d, result_sno, drs_index_last)
+
+    # src_data_d =================================================
+    # src_data_dc ================================================
+    if result_sno is not False:
+        conn.commit()
+    return
 
 
 if __name__ == "__main__":
     current_path = os.getcwd()
-    drs_list = Path(current_path) / 'drs'
+    drs_list = Path(current_path) / 'test'
     listdir = os.listdir(drs_list)
 
     flag = 0
@@ -559,5 +152,5 @@ if __name__ == "__main__":
             print(f'{index} :: {filename}')
             drs_path = file_path / filename
             one_start = datetime.now()
-            result_final = data_parse(drs_path, filename)
+            result_final = test_parse(drs_path, filename)
             flag += 1
