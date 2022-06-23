@@ -1,6 +1,4 @@
 import os
-import re
-import traceback
 from pathlib import Path
 import psycopg2
 from datetime import datetime
@@ -14,12 +12,11 @@ class SRC_DATA_M_CRUD:
     def m_select(self, drs_file_name):
         cur = self.cursor
         sql = f"""
-            SELECT file_sno FROM public.tb_ai_src_data_m WHERE file_nm='{drs_file_name}'
+            SELECT nextval('sq_file_01'::regclass)-1 as sq FROM sq_file_01;
         """
         try:
             cur.execute(sql)
             result = cur.fetchone()
-            print(result[0])
         except psycopg2.Error as e:
             print(e)
             return False
@@ -29,6 +26,7 @@ class SRC_DATA_M_CRUD:
         cur = self.cursor
         sql = f"""
             INSERT INTO public.tb_ai_src_data_m(
+                file_sno,
                 file_nm,
 	            lot_no,
                 lot_date,
@@ -44,7 +42,12 @@ class SRC_DATA_M_CRUD:
 	            upd_date,
 	            updr_id
 	        ) VALUES (
-	            {row_data}
+	            {row_data},
+	            ,
+	            ,
+	            ,
+	            ,
+	            ,
 	        );
         """
         try:
@@ -54,18 +57,16 @@ class SRC_DATA_M_CRUD:
             return False
         return True
 
-    def mc_insert(self, file_sno, sns_no, sns_rm):
+    def mc_insert(self, data_row):
         cur = self.cursor
         sql = f"""
             INSERT INTO public.tb_ai_src_data_mc(
                 file_sno,
                 sns_no,
                 sns_nm
-	        ) VALUES (
-	            {file_sno},
-	            {sns_no},
-	            '{sns_rm}'
-	        );
+	        ) VALUES 
+	            {data_row}
+	        ;
         """
         try:
             cur.execute(sql)
@@ -83,12 +84,11 @@ class SRC_DATA_D_CRUD:
     def d_select(self, file_sno):
         cur = self.cursor
         sql = f"""
-            SELECT file_sns_sno FROM public.tb_ai_src_data_d WHERE file_sno='{file_sno}'
+            SELECT nextval('sq_file_sns_01'::regclass)-1 as sq FROM sq_file_sns_01;
         """
         try:
             cur.execute(sql)
             result = cur.fetchone()
-            print(result[0])
         except psycopg2.Error as e:
             print(e)
             return False
@@ -98,6 +98,7 @@ class SRC_DATA_D_CRUD:
         cur = self.cursor
         sql = f"""
             INSERT INTO public.tb_ai_src_data_d(
+                file_sns_sno,
                 file_sno,
 				occr_date, 
 				prs_cd,
@@ -121,19 +122,17 @@ class SRC_DATA_D_CRUD:
             return False
         return True
 
-    def dc_insert(self, file_sno, sns_no, sns_val):
+    def dc_insert(self, data_row):
         cur = self.cursor
         sql = f"""
                 INSERT INTO public.tb_ai_src_data_dc(
-                    file_sno,
+                    file_sns_sno,
                     sns_no,
                     sns_val
-    	        ) VALUES (
-    	            {file_sno},
-    	            {sns_no},
-    	            '{sns_val}'
-    	        );
-            """
+        	    ) VALUES 
+        	        {data_row}
+        	    ;
+        """
         try:
             cur.execute(sql)
         except psycopg2.Error as e:
@@ -155,125 +154,160 @@ def sns_separate(whl_sns):
     return sns_sql_string
 
 
+# $F, K, D, V, U, A 처리
+def master_dataset(src_class, drsfile_name, header_list):
+    head_dict = {}
+    for line in header_list:
+        head_dict[line[1:2]] = line[3:].replace('\n', '')
+    # src_data_m =================================================
+    k_val = head_dict['K']
+    lot_date = str(datetime.now().year)[:2] + drsfile_name.split('_')[3].replace('.drs', '')
+    col_01_file_nm = drsfile_name
+    col_02_lot_no = k_val.split(',')[3]
+    col_03_lot_date = f'{lot_date[:8]} {lot_date[8:10]}:{lot_date[10:]}'
+    col_04_prs_cd = '_'.join(k_val.split(',')[:3])
+    col_05_f_val = head_dict['F']
+    col_06_k_val = k_val
+    col_07_d_val = head_dict['D']
+    col_08_v_val = head_dict['V']
+    col_09_u_val = head_dict['U']
+    col_10_whl_sns_nm = head_dict['A']
+    col_11_reg_date = 'CURRENT_DATE'
+    col_12_regr_id = 'GUGO'
+    col_13_upd_date = 'CURRENT_DATE'
+    col_14_updr_id = 'GUGO'
+    result_sno = src_class.m_select(drsfile_name)
+    src_m_string = f"""
+        '{result_sno}', '{col_01_file_nm}', '{col_02_lot_no}', '{col_03_lot_date}', '{col_04_prs_cd}',
+        '{col_05_f_val}', '{col_06_k_val}', '{col_07_d_val}', '{col_08_v_val}', '{col_09_u_val}',
+        '{col_10_whl_sns_nm}', {col_11_reg_date}, '{col_12_regr_id}', {col_13_upd_date}, '{col_14_updr_id}'
+    """
+    # print(src_m_string)
+    result_m = src_class.m_insert(src_m_string)
+    if result_m is False:
+        return False
+    # src_data_mc ================================================
+    sns_list = col_10_whl_sns_nm.upper().split(',')
+    sql_row = ''
+    for num, sns in enumerate(sns_list):
+        sql_row += f"({result_sno}, {num + 1}, '{sns}'),"
+    print(sql_row)
+    result_mc = src_class.mc_insert(sql_row[:-1])
+    return result_sno, col_04_prs_cd
+
+
+# s1 ~ s3 처리
+def one_dataset(src_class, file_sno, sensor_list, master_prs_cd):
+    col_01_file_sno = file_sno
+    col_02_prs_cd = ''
+    col_03_wfr_no = ''
+    col_04_chm_no = ''
+    col_05_idl_dtt = ''
+    step_dataset = []
+    step_row_start = 0
+    step_row_end = 0
+    for val in sensor_list:
+        val = val.replace('\n', '').split(',')
+        if val[0] == '$S':
+            if val[2] == '1':
+                col_03_wfr_no = int(val[4])
+                col_04_chm_no = int(val[5])
+                col_05_idl_dtt = val[6]
+            elif val[2] == '2':
+                for steprow in step_dataset[step_row_start:step_row_end]:
+                    steprow['stp_no'] = val[4]
+                    step_row_start = step_row_end
+            elif val[2] == '3':
+                col_02_prs_cd = master_prs_cd.split('_')
+                col_02_prs_cd[2] = val[4].replace('"', '')
+                col_02_prs_cd = '_'.join(col_02_prs_cd)
+                for steprow in step_dataset:
+                    steprow['prs_cd'] = col_02_prs_cd
+                pass
+            else:
+                print('Error')
+                return False
+        else:
+            step_row_end += 1
+            onerow = {
+                'file_sno': file_sno,
+                'occr_date': val[0],
+                'prs_cd': '',
+                'wfr_no': col_03_wfr_no,
+                'chm_no': col_04_chm_no,
+                'idl_dtt': col_05_idl_dtt,
+                'stp_no': 0,
+                'whl_sns_val': ','.join(val[1:]),
+            }
+            step_dataset.append(onerow)
+
+    for row in step_dataset:
+        timestamp = row['occr_date'].split(' ')
+        temp_yyyymmdd = timestamp[0].split('/')
+        yyyymmdd = f'{temp_yyyymmdd[0].zfill(4)}{temp_yyyymmdd[1].zfill(2)}{temp_yyyymmdd[2].zfill(2)}'
+        hhmmss = timestamp[1].split(':')
+        occr_date = f'{yyyymmdd} {hhmmss[0]}:{hhmmss[1]}:{hhmmss[2]}.{hhmmss[3]}'
+        reg_date = 'CURRENT_DATE'
+        regr_id = 'GUGO'
+        upd_date = 'NULL'
+        updr_id = 'NULL'
+        result_sno = src_class.d_select(row['file_sno'])
+        sql = f"""
+            '{result_sno}', '{row['file_sno']}', '{occr_date}', '{row['prs_cd']}', '{row['wfr_no']}', '{row['chm_no']}',
+            '{row['idl_dtt']}', '{row['stp_no']}', '{row['whl_sns_val']}',
+            {reg_date}, '{regr_id}', {upd_date}, {updr_id}
+        """
+        result_d = src_class.d_insert(sql)
+        if result_d is False:
+            print('Error')
+            return False
+        # src_data_dc ================================================
+        snv_list = row['whl_sns_val'].split(',')
+        sql_row = ''
+        for num, snv in enumerate(snv_list):
+            sql_row += f"({result_sno}, {num + 1}, '{snv}'),"
+        result_dc = src_class.dc_insert(sql_row[:-1])
+        if result_dc is False:
+            return False
+    return True
+
+
 # 데이터 파싱
-def data_parse(data):
+def data_parse(data, f_name):
     conn = psycopg2.connect(dbname='dutchboy', user='dutchboy', password='dutchboy2022!', host='3.36.61.69', port=5432)
     cur = conn.cursor()
+
+    src_m = SRC_DATA_M_CRUD(cur)
+    src_d = SRC_DATA_D_CRUD(cur)
 
     r = open(data, 'r')
     drs_full = r.readlines()
 
-    # src_data_m ===========================================
-    src_data_m = SRC_DATA_M_CRUD(cur)
-    f_val, k_val, d_val, v_val, u_val, whl_sns_nm, act_dtt = '', '', '', '', '', '', ''
-    for line in drs_full:
-        if line[:1] == '$':
-            if line[1:2] == 'F':
-                f_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'K':
-                k_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'D':
-                d_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'V':
-                v_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'U':
-                u_val = line[3:].replace('\n', '')
-            elif line[1:2] == 'A':
-                whl_sns_nm = line[3:].replace('\n', '')
-            elif line[1:2] == 'S':
-                act_dtt = line[3:].replace('\n', '')
+    # S1 index 추출
+    flag_list = []
+    for flag_1_index, line in enumerate(drs_full):
+        if line[:2] != '$S':
+            continue
         else:
-            if f_val != '' and k_val != '' and d_val != '' and v_val != '' and u_val != '' and whl_sns_nm != '' and act_dtt != '':
-                break
-            else:
-                continue
-    lot_ymd = act_dtt[:10].replace('/', '')
-    lot_no = k_val.split(',')[3]
-    prs_cd_list = k_val.split(',')[:3]
-    prs_cd = '_'.join(prs_cd_list)
-    sns_sql_string = sns_separate(whl_sns_nm)
-    reg_string = "CURRENT_DATE, 'GUGO', "
-    upd_string = "CURRENT_DATE, 'GUGO'"
-
-    # ======================================================
-
-    # src_data_d ===========================================
-    src_data_d = SRC_DATA_D_CRUD(cur)
-    drs_string = ', '.join(e.replace('\n', '') for e in drs_full)
-    snv_list = drs_string.split('$S,')
-    lot_number = ''
-    wafer_number = ''
-    chamber_number = ''
-    idle_flag = ''
-    step_number = ''
-    forflag = True
-    for index, i in enumerate(snv_list):
-        if forflag is not True:
+            line_list = line.split(',')
+            if line_list[2] == '1':
+                flag_list.append(flag_1_index)
+    # $F, K, D, V, U, A 묶음
+    drs_index_0 = drs_full[0:flag_list[0]]
+    result_sno, master_prs_cd = master_dataset(src_m, f_name, drs_index_0)
+    # S1 - S3 묶음 (1 ~ n-1)번째
+    for i in range(len(flag_list) - 1):
+        drs_index_mid = drs_full[flag_list[i]:flag_list[i + 1]]
+        result_d = one_dataset(src_d, result_sno, drs_index_mid, master_prs_cd)
+        if result_d is False:
             break
-        if index > 0:  # $S가 나오기 전 = 헤더값
-            onerow = i.split(', ')
-            action_flag = onerow[0].split(',')  # $S줄의 데이터
+    # S1 - S3 묶음 n번째
+    drs_index_last = drs_full[flag_list[-1]:]
+    result_d = one_dataset(src_d, result_sno, drs_index_last, master_prs_cd)
 
-            if action_flag[1] == '1':  # $S의 플래그 값이 1인 경우
-                lot_number = action_flag[2].replace('"', '')
-                wafer_number = action_flag[3]
-                chamber_number = action_flag[4]
-                idle_flag = action_flag[5]
-                step_number = 'NULL'
-                if len(onerow) == 1:
-                    continue
-            elif action_flag[1] == '2':  # $S의 플래그 값이 2인 경우
-                chamber_number = action_flag[2]
-                step_number = action_flag[3]
-                idle_flag = action_flag[4]
-            elif action_flag[1] == '3':  # $S의 플래그 값이 3인 경우(데이터 없음)
-                chamber_number = action_flag[2]
-                step_number = action_flag[3].replace('"', '')  # 이 경우 step_number = recipe_name
-                idle_flag = action_flag[4]
-                prs_cd_list[2] = step_number
-                prs_cd = '_'.join(prs_cd_list)
-            else:
-                pass
-            for snv_row in onerow[1:]:
-                if snv_row == '':
-                    break
-                snv_row_list = snv_row.split(',')
-                time = snv_row_list[0].split(' ')
-                yyyymmdd = time[0].split('/')
-                lot_ymd = f'{yyyymmdd[0].zfill(4)}{yyyymmdd[1].zfill(2)}{yyyymmdd[2].zfill(2)}'
-                lot_no = lot_number
-                occr_date_unready = time[1].split(':')
-                occr_date = f'{lot_ymd} {occr_date_unready[0]}:{occr_date_unready[1]}:{occr_date_unready[2]}.{occr_date_unready[3]}'
-                act_dtt = action_flag[1]
-                wfr_no = wafer_number
-                chm_no = chamber_number
-                idl_dtt = idle_flag
-                stp_no = step_number
-                whl_sns_val = ','.join(snv_row_list[1:])
-                snv_query_string = sns_separate(whl_sns_val)
-                reg_string = "CURRENT_DATE, 'GUGO', "
-                upd_string = "CURRENT_DATE, 'GUGO'"
-                sql_query = f"'{lot_ymd}', '{lot_no}', '{prs_cd}', '{occr_date}', '{act_dtt}', '{wfr_no}', '{chm_no}', '{idl_dtt}', '{stp_no}', '{whl_sns_val}', "
-                sql_query += snv_query_string + reg_string + upd_string
-
-                result_d = src_data_d.insert(sql_query)
-
-                if result_d is True:
-                    continue
-                else:
-                    forflag = False
-                    break
-
-    # ======================================================
-
-    sql_query = f"'{lot_ymd}', '{lot_no}', '{prs_cd}', '{f_val}', '{k_val}', '{d_val}', '{v_val}', '{u_val}', '{whl_sns_nm}', "
-    sql_query += sns_sql_string + reg_string + upd_string
-    result_m = src_data_m.insert(sql_query)
-    if result_m is True:
+    if result_sno is not False and result_d is not False:
         conn.commit()
-        return True
-    else:
-        return False
+    return
 
 
 if __name__ == "__main__":
@@ -290,7 +324,7 @@ if __name__ == "__main__":
             print(f'{index} :: {filename}')
             drs_path = file_path / filename
             one_start = datetime.now()
-            result_final = data_parse(drs_path)
+            result_final = data_parse(drs_path, filename)
 
             if result_final is False:
                 break
