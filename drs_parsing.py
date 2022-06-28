@@ -9,7 +9,24 @@ class SRC_DATA_M_CRUD:
     def __init__(self, cursor):
         self.cursor = cursor
 
-    def m_select(self, drs_file_name):
+    def file_sno_select(self, file_nm):
+        cur = self.cursor
+        sql = f"""
+            SELECT file_sno FROM public.tb_ai_src_data_m
+            WHERE file_nm LIKE '{file_nm}%';
+        """
+        try:
+            cur.execute(sql)
+            result = cur.fetchone()
+            if result is None:
+                return 0
+        except psycopg2.Error as e:
+            print(e)
+            print('mnt_select error')
+            return False
+        return result[0]
+
+    def m_select(self):
         cur = self.cursor
         sql = f"""
             SELECT nextval('sq_file_01'::regclass)-1 as sq FROM sq_file_01;
@@ -19,6 +36,7 @@ class SRC_DATA_M_CRUD:
             result = cur.fetchone()
         except psycopg2.Error as e:
             print(e)
+            print("m_select error")
             return False
         return result[0]
 
@@ -42,18 +60,14 @@ class SRC_DATA_M_CRUD:
 	            upd_date,
 	            updr_id
 	        ) VALUES (
-	            {row_data},
-	            ,
-	            ,
-	            ,
-	            ,
-	            ,
+	            {row_data}
 	        );
         """
         try:
             cur.execute(sql)
         except psycopg2.Error as e:
             print(e)
+            print("m_insert error")
             return False
         return True
 
@@ -72,6 +86,7 @@ class SRC_DATA_M_CRUD:
             cur.execute(sql)
         except psycopg2.Error as e:
             print(e)
+            print("mc_insert error")
             return False
         return True
 
@@ -81,7 +96,7 @@ class SRC_DATA_D_CRUD:
     def __init__(self, cursor):
         self.cursor = cursor
 
-    def d_select(self, file_sno):
+    def d_select(self):
         cur = self.cursor
         sql = f"""
             SELECT nextval('sq_file_sns_01'::regclass)-1 as sq FROM sq_file_sns_01;
@@ -91,6 +106,7 @@ class SRC_DATA_D_CRUD:
             result = cur.fetchone()
         except psycopg2.Error as e:
             print(e)
+            print("d_select error")
             return False
         return result[0]
 
@@ -111,14 +127,16 @@ class SRC_DATA_D_CRUD:
     	        regr_id,
     	        upd_date,
     	        updr_id
-    	        ) VALUES (
+    	        ) VALUES
     	            {row_data}
-    	        );
+    	        ;
             """
         try:
             cur.execute(sql)
         except psycopg2.Error as e:
             print(e)
+            print("d_insert error")
+            print(sql)
             return False
         return True
 
@@ -137,22 +155,26 @@ class SRC_DATA_D_CRUD:
             cur.execute(sql)
         except psycopg2.Error as e:
             print(e)
+            print("dc_insert error")
             return False
         return True
 
-
-# 전체 센서 코드 분리
-def sns_separate(whl_sns):
-    sns_sql_string = ''
-    sns_list = whl_sns.upper().split(',')
-    for sns in sns_list:
-        sns_sql_string += f"'{sns}', "
-    if len(sns_list) < 200:
-        for i in range(200 - len(sns_list)):
-            sns_sql_string += 'NULL, '
-    sns_sql_string = sns_sql_string.replace('\n', '')
-    return sns_sql_string
-
+    def time_select(self, file_sno, wfr_no):
+        cur = self.cursor
+        sql = f"""
+            SELECT occr_date FROM public.tb_ai_src_data_d
+            WHERE file_sno={file_sno}
+            AND wfr_no={wfr_no}
+            AND idl_dtt='0';
+        """
+        try:
+            cur.execute(sql)
+            result = cur.fetchall()
+        except psycopg2.Error as e:
+            print(e)
+            print("d_select error")
+            return False
+        return result
 
 # $F, K, D, V, U, A 처리
 def master_dataset(src_class, drsfile_name, header_list):
@@ -176,7 +198,12 @@ def master_dataset(src_class, drsfile_name, header_list):
     col_12_regr_id = 'GUGO'
     col_13_upd_date = 'CURRENT_DATE'
     col_14_updr_id = 'GUGO'
-    result_sno = src_class.m_select(drsfile_name)
+
+    # pk sequence를 가져오면서 1 증가, 메모리에 저장해서 사용
+    # insert, select를 처리하는 시간동안 다른 인스턴스에서 접근할 경우
+    # a인스턴스에서 사용하던 시퀀스 값이 트랜잭션 되기 전에
+    # b인스턴스에서 먼저 트랜잭션 될 상황을 방지
+    result_sno = src_class.m_select()
     src_m_string = f"""
         '{result_sno}', '{col_01_file_nm}', '{col_02_lot_no}', '{col_03_lot_date}', '{col_04_prs_cd}',
         '{col_05_f_val}', '{col_06_k_val}', '{col_07_d_val}', '{col_08_v_val}', '{col_09_u_val}',
@@ -187,37 +214,41 @@ def master_dataset(src_class, drsfile_name, header_list):
     if result_m is False:
         return False
     # src_data_mc ================================================
+    # drs파일 1개당 센서 개수만큼 mc테이블 행 추가
+    # 문자열로 만들어 multiple rows insert
     sns_list = col_10_whl_sns_nm.upper().split(',')
     sql_row = ''
     for num, sns in enumerate(sns_list):
         sql_row += f"({result_sno}, {num + 1}, '{sns}'),"
-    print(sql_row)
     result_mc = src_class.mc_insert(sql_row[:-1])
     return result_sno, col_04_prs_cd
 
 
 # s1 ~ s3 처리
+# $S의 플래그 값 1~3(웨이퍼 1개당 처리 과정) 마다 반복
 def one_dataset(src_class, file_sno, sensor_list, master_prs_cd):
     col_01_file_sno = file_sno
     col_02_prs_cd = ''
     col_03_wfr_no = ''
     col_04_chm_no = ''
     col_05_idl_dtt = ''
+    col_06_stp_no = 0
     step_dataset = []
     step_row_start = 0
     step_row_end = 0
     for val in sensor_list:
         val = val.replace('\n', '').split(',')
         if val[0] == '$S':
-            if val[2] == '1':
+            if val[2] == '1':  # 웨이퍼번호, 챔버번호, 아이들플래그 저장
                 col_03_wfr_no = int(val[4])
                 col_04_chm_no = int(val[5])
                 col_05_idl_dtt = val[6]
-            elif val[2] == '2':
+            elif val[2] == '2':  # 분기를 만나기 이전까지의 센서데이터들 스텝 번호 채우기
                 for steprow in step_dataset[step_row_start:step_row_end]:
+                    col_06_stp_no = val[4]  # 날짜가 변경되면서 생기는 out range값에 자동으로 이전 스텝번호 부여
                     steprow['stp_no'] = val[4]
-                    step_row_start = step_row_end
-            elif val[2] == '3':
+                    step_row_start = step_row_end  # 채우고 나면 start 플래그 이동
+            elif val[2] == '3':  #
                 col_02_prs_cd = master_prs_cd.split('_')
                 col_02_prs_cd[2] = val[4].replace('"', '')
                 col_02_prs_cd = '_'.join(col_02_prs_cd)
@@ -232,16 +263,21 @@ def one_dataset(src_class, file_sno, sensor_list, master_prs_cd):
             onerow = {
                 'file_sno': file_sno,
                 'occr_date': val[0],
-                'prs_cd': '',
+                'prs_cd': col_02_prs_cd,
                 'wfr_no': col_03_wfr_no,
                 'chm_no': col_04_chm_no,
                 'idl_dtt': col_05_idl_dtt,
-                'stp_no': 0,
+                'stp_no': col_06_stp_no,
                 'whl_sns_val': ','.join(val[1:]),
             }
             step_dataset.append(onerow)
-
-    for row in step_dataset:
+    d_list = []
+    dc_list = []
+    # 센서데이터가 없는 경우
+    if len(step_dataset) == 0:
+        return True
+    for rindex, row in enumerate(step_dataset):
+        print(f'{rindex + 1} : {row}')
         timestamp = row['occr_date'].split(' ')
         temp_yyyymmdd = timestamp[0].split('/')
         yyyymmdd = f'{temp_yyyymmdd[0].zfill(4)}{temp_yyyymmdd[1].zfill(2)}{temp_yyyymmdd[2].zfill(2)}'
@@ -251,29 +287,31 @@ def one_dataset(src_class, file_sno, sensor_list, master_prs_cd):
         regr_id = 'GUGO'
         upd_date = 'NULL'
         updr_id = 'NULL'
-        result_sno = src_class.d_select(row['file_sno'])
+        result_sno = src_class.d_select()
+
         sql = f"""
-            '{result_sno}', '{row['file_sno']}', '{occr_date}', '{row['prs_cd']}', '{row['wfr_no']}', '{row['chm_no']}',
+            ({result_sno}, '{row['file_sno']}', '{occr_date}', '{row['prs_cd']}', '{row['wfr_no']}', '{row['chm_no']}',
             '{row['idl_dtt']}', '{row['stp_no']}', '{row['whl_sns_val']}',
-            {reg_date}, '{regr_id}', {upd_date}, {updr_id}
+            {reg_date}, '{regr_id}', {upd_date}, {updr_id})
         """
-        result_d = src_class.d_insert(sql)
-        if result_d is False:
-            print('Error')
-            return False
+        d_list.append(sql)
         # src_data_dc ================================================
         snv_list = row['whl_sns_val'].split(',')
-        sql_row = ''
         for num, snv in enumerate(snv_list):
-            sql_row += f"({result_sno}, {num + 1}, '{snv}'),"
-        result_dc = src_class.dc_insert(sql_row[:-1])
-        if result_dc is False:
-            return False
+            sql_row = f"({result_sno}, {num + 1}, '{snv}')"
+            dc_list.append(sql_row)
+    d_sql = ', '.join(d_list)
+    dc_sql = ', '.join(dc_list)
+    result_d = src_class.d_insert(d_sql)
+    result_dc = src_class.dc_insert(dc_sql)
+    if result_d is False or result_dc is False:
+        print('Error')
+        return False
     return True
 
 
 # 데이터 파싱
-def data_parse(data, f_name):
+def drs_parse(data, f_name):
     conn = psycopg2.connect(dbname='dutchboy', user='dutchboy', password='dutchboy2022!', host='3.36.61.69', port=5432)
     cur = conn.cursor()
 
@@ -307,34 +345,35 @@ def data_parse(data, f_name):
 
     if result_sno is not False and result_d is not False:
         conn.commit()
-    return
+    return True
 
 
 if __name__ == "__main__":
-    current_path = os.getcwd()
-    drs_list = Path(current_path) / 'drs'
+    sep = os.sep
+    current_path = os.getcwd().split(sep)[:-1]
+    current_path.append('50.Data')
+    drs_list = Path(sep.join(current_path)) / 'Sample'
     listdir = os.listdir(drs_list)
-
-    for dirname in listdir:
-        file_path = drs_list / dirname
+    for name in listdir:
+        result = os.path.isdir(drs_list / name)
+        if result is not True:  # 디렉토리가 아닌 경우 스킵
+            continue
+        file_path = drs_list / name
         result_check = []
         work_start = datetime.now()
         listdrs = os.listdir(file_path)
         for index, filename in enumerate(listdrs):
-            print(f'{index} :: {filename}')
+            if filename[-3:] != 'drs':  # drs 파일이 아닌경우 스킵
+                continue
             drs_path = file_path / filename
             one_start = datetime.now()
-            result_final = data_parse(drs_path, filename)
-
-            if result_final is False:
-                break
+            result_final = drs_parse(drs_path, filename)
             one_end = datetime.now()
-            print(f'{filename} 파일 처리 시간 : {one_end - one_start}')
-            result_check.append(result_final)
+            if result_final is True:
+                print(f'{filename} 파일 처리 시간 : {one_end - one_start}')
+                result_check.append(result_final)
         print(result_check)
         print(f'{len(listdrs) - len(result_check)}건 실패')
-        if False not in result_check:
-            work_end = datetime.now()
-            print(f'{len(result_check)}건 처리 시간 : {work_end - work_start}')
-        else:
-            print(result_check)
+        work_end = datetime.now()
+        print(f'{len(result_check)}건 처리 시간 : {work_end - work_start}')
+
